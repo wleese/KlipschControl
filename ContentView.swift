@@ -15,7 +15,10 @@ let analog = Data([0x04])
 
 
 struct ContentView: View {
-    @StateObject var speaker = Speaker()
+    @StateObject var speaker: Speaker
+    init(speaker: Speaker) {
+        _speaker = StateObject(wrappedValue: speaker)
+    }
     
     var body: some View {
         VStack {
@@ -40,6 +43,7 @@ struct ContentView: View {
             }
         }.padding()
         
+        Text(speaker.statusText)
 
         Divider()
         
@@ -113,5 +117,5 @@ struct ContentView: View {
 }
 
 #Preview {
-    ContentView()
+    ContentView(speaker: Speaker())
 }

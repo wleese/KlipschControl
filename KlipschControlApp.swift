@@ -26,6 +26,7 @@ class Speaker: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, Observa
     @Published var deviceReady = false
     @Published var powerOn = false
     @Published var volume = Data([0x01])
+    @Published var statusText = "Disconnected"
 
     var UUIDS: [String] = []
     
@@ -42,34 +43,46 @@ class Speaker: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, Observa
         UUIDS = [VOLUME_UUID, POWER_UUID, INPUT_UUID]
         centralManager = CBCentralManager(delegate: self, queue: DispatchQueue.main, options: [CBCentralManagerOptionRestoreIdentifierKey: DEVICE_NAME])
     }
+    
+    func triggerScan() {
+        self.statusText = "Looking for speaker"
+        centralManager.scanForPeripherals(withServices: nil, options: nil)
+    }
 
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
        switch central.state {
        case .poweredOn:
            bluetoothReady = true
+           self.statusText = "Bluetooth is ready"
            centralManager.scanForPeripherals(withServices: nil, options: nil)
        default:
            deviceReady = false
            powerOn = false
            bluetoothReady = false
+           self.statusText = "Bluetooth not ready"
            break
        }
     }
     
     // Restore the connection to the peripherals
     func centralManager(_ central: CBCentralManager, willRestoreState dict: [String: Any]) {
+        self.statusText = "Restoring state"
         if bluetoothReady {
             if let peripherals = dict[CBCentralManagerRestoredStatePeripheralsKey] as? [CBPeripheral] {
                 for peripheral in peripherals {
                     centralManager.connect(peripheral, options: nil)
                 }
             }
+        } else {
+            self.statusText = "Bluetooth not ready"
         }
     }
 
     func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String : Any], rssi RSSI: NSNumber) {
+        
         if peripheral.name == DEVICE_NAME {
-            // save a reference to the sensor tag
+            self.statusText = "Found our speaker"
+            
             connectedPeripheral = peripheral
             connectedPeripheral!.delegate = self
             
@@ -84,23 +97,27 @@ class Speaker: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, Observa
     // callback connect
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         connectedPeripheral?.discoverServices(nil)
+        self.statusText = "Connected to speaker"
     }
     
     // callback service
     func peripheral( _ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
+        self.statusText = "Discovering services"
         guard let services = peripheral.services, error == nil else {
-            logger.error("An error occurred discovering services: \(error)")
+            self.statusText = "An error occurred discovering services"
             return
         }
         for service in services {
+            self.statusText = "Found service \(peripheral.name as String?)"
             peripheral.discoverCharacteristics(nil, for: service)
         }
     }
     
     // callback found characteristic
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
+        self.statusText = "Discovered characteristic"
         if let error = error {
-            logger.error("An error occurred discovering characteristics: \(error)")
+            self.statusText = "An error occurred discovering characteristics: " + error.localizedDescription
         }
         
         service.characteristics?.forEach({ characteristic in
@@ -120,6 +137,7 @@ class Speaker: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, Observa
     func peripheral(_ peripheral: CBPeripheral, didDiscoverDescriptorsFor characteristic: CBCharacteristic, error: Error?) {
         if UUIDS.contains(characteristic.uuid.uuidString) {
             descriptors[characteristic.uuid.uuidString] = characteristic.descriptors
+            self.statusText = "Connected"
             deviceReady = true
         }
     }
@@ -132,7 +150,7 @@ class Speaker: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, Observa
     // using the read value also is done here
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
         if let e = error {
-            logger.error("ERROR didUpdateValue \(e)")
+            self.statusText = "Error didUpdateValue \(e.localizedDescription)"
             return
         }
 
@@ -153,13 +171,71 @@ class Speaker: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, Observa
             }
         }
     }
+    
+    // handle fail to connects
+    func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
+        if let error = error {
+            self.statusText = "Failed to connect: \(error.localizedDescription)"
+        }
+    }
+    
+    // handle disconnects
+    func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
+        // no reason to yet..
+    }
+    
+    func disconnect() {
+        if let connectedPeripheral {
+            centralManager.cancelPeripheralConnection(connectedPeripheral)
+            self.statusText = "Disconnected after backgrounding"
+            self.deviceReady = false
+        }
+    }
 }
 
 @main
 struct KlipschControlApp: App {
+    @Environment(\.scenePhase) var scenePhase
+    
+    var speaker = Speaker()
+    
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ContentView(speaker: speaker)
         }
+        .onChange(of: scenePhase) {
+            if scenePhase == .active {
+                speaker.triggerScan()
+            }
+            if scenePhase == .background {
+                startBackgroundTask()
+            }
+
+        }
+    }
+    
+    // We need to use the annotation here to have a mutatable value in our struct
+    @State var backgroundTaskId: UIBackgroundTaskIdentifier = .invalid
+    
+    func startBackgroundTask() {
+        backgroundTaskId = UIApplication.shared.beginBackgroundTask { [self] in
+            self.endBackgroundTask()
+        }
+        
+        DispatchQueue.global(qos: .background).async { [self] in
+            Thread.sleep(forTimeInterval: 30)
+            
+            // Final check
+            if UIApplication.shared.applicationState == .background {
+                speaker.disconnect()
+            }
+            
+            self.endBackgroundTask()
+        }
+    }
+    
+    func endBackgroundTask() {
+        UIApplication.shared.endBackgroundTask(backgroundTaskId)
+        backgroundTaskId = .invalid
     }
 }
