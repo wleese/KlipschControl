@@ -187,9 +187,35 @@ class Speaker: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, Observa
     func disconnect() {
         if let connectedPeripheral {
             centralManager.cancelPeripheralConnection(connectedPeripheral)
-            self.statusText = "Disconnected after backgrounding"
-            self.deviceReady = false
         }
+    }
+    
+    func forcePowerOn() {
+        self.connectedPeripheral?.setNotifyValue(true, for: self.characteristics[INPUT_UUID]!)
+        self.connectedPeripheral?.writeValue(Data([0x01]), for: self.characteristics[POWER_UUID]!, type: .withResponse)
+    }
+    
+    func switchInput(data: Data) {
+        self.connectedPeripheral?.setNotifyValue(true, for: self.characteristics[INPUT_UUID]!)
+        self.connectedPeripheral?.writeValue(digital, for: self.characteristics[INPUT_UUID]!, type: .withResponse)
+    }
+    
+    func volumeUp() {
+        let integerValue = self.volume.withUnsafeBytes { $0.load(as: UInt8.self) }
+        let newValue = integerValue + 1
+        let data = Data([newValue])
+        
+        self.connectedPeripheral?.setNotifyValue(true, for: self.characteristics[VOLUME_UUID]!)
+        self.connectedPeripheral?.writeValue(data, for: self.characteristics[VOLUME_UUID]!, type: .withResponse)
+    }
+    
+    func volumeDown() {
+        let integerValue = self.volume.withUnsafeBytes { $0.load(as: UInt8.self) }
+        let newValue = integerValue - 1
+        let data = Data([newValue])
+        
+        self.connectedPeripheral?.setNotifyValue(true, for: self.characteristics[VOLUME_UUID]!)
+        self.connectedPeripheral?.writeValue(data, for: self.characteristics[VOLUME_UUID]!, type: .withResponse)
     }
 }
 
@@ -223,7 +249,7 @@ struct KlipschControlApp: App {
         }
         
         DispatchQueue.global(qos: .background).async { [self] in
-            Thread.sleep(forTimeInterval: 30)
+            Thread.sleep(forTimeInterval: 20)
             
             // Final check
             if UIApplication.shared.applicationState == .background {

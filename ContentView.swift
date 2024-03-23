@@ -28,30 +28,24 @@ struct ContentView: View {
                 Image(systemName: "speaker.3.fill")
                     .font(.system(size: 140))
                     .padding().foregroundColor(.green).opacity(0.5)
-                    .onTapGesture {
-                        speaker.connectedPeripheral?.setNotifyValue(true, for: speaker.characteristics[speaker.INPUT_UUID]!)
-                        speaker.connectedPeripheral?.writeValue(Data([0x01]), for: speaker.characteristics[speaker.POWER_UUID]!, type: .withResponse)
-                    }
+                    .onTapGesture { speaker.forcePowerOn() }
             } else {
                 Image(systemName: "speaker.3.fill")
                     .font(.system(size: 140))
                     .padding().foregroundColor(.red).opacity(0.3)
-                    .onTapGesture {
-                        speaker.connectedPeripheral?.setNotifyValue(true, for: speaker.characteristics[speaker.INPUT_UUID]!)
-                        speaker.connectedPeripheral?.writeValue(Data([0x01]), for: speaker.characteristics[speaker.POWER_UUID]!, type: .withResponse)
-                    }
+                    .onTapGesture { speaker.forcePowerOn() }
             }
         }.padding()
         
         Text(speaker.statusText)
+            .onTapGesture { speaker.triggerScan() }
 
         Divider()
         
         VStack {
             HStack {
                 Button(action: {
-                    speaker.connectedPeripheral?.setNotifyValue(true, for: speaker.characteristics[speaker.INPUT_UUID]!)
-                    speaker.connectedPeripheral?.writeValue(digital, for: speaker.characteristics[speaker.INPUT_UUID]!, type: .withResponse)
+                    speaker.switchInput(data: digital)
                 }) {
                     Text("Television")
                         .padding(.horizontal, 30)
@@ -62,8 +56,7 @@ struct ContentView: View {
 
                 }
                 Button(action: {
-                    speaker.connectedPeripheral?.setNotifyValue(true, for: speaker.characteristics[speaker.INPUT_UUID]!)
-                    speaker.connectedPeripheral?.writeValue(usbComputer, for: speaker.characteristics[speaker.INPUT_UUID]!, type: .withResponse)
+                    speaker.switchInput(data: usbComputer)
                 }) {
                     Text("Speaker Only")
                         .padding()
@@ -80,12 +73,7 @@ struct ContentView: View {
             Text("Volume (\(vol))").font(.title3).bold()
             
                 Button(action: {
-                    let integerValue = speaker.volume.withUnsafeBytes { $0.load(as: UInt8.self) }
-                    let newValue = integerValue +  1
-                    let data = Data([newValue])
-                    
-                    speaker.connectedPeripheral?.setNotifyValue(true, for: speaker.characteristics[speaker.VOLUME_UUID]!)
-                    speaker.connectedPeripheral?.writeValue(data, for: speaker.characteristics[speaker.VOLUME_UUID]!, type: .withResponse)
+                    speaker.volumeUp()
                 }) {
                     Image(systemName: "arrow.up").bold()
                         .padding(.horizontal, 60)
@@ -95,12 +83,7 @@ struct ContentView: View {
                         .cornerRadius(10)
                 }
                 Button(action: {
-                    let integerValue = speaker.volume.withUnsafeBytes { $0.load(as: UInt8.self) }
-                    let newValue = integerValue - 1
-                    let data = Data([newValue])
-                    
-                    speaker.connectedPeripheral?.setNotifyValue(true, for: speaker.characteristics[speaker.VOLUME_UUID]!)
-                    speaker.connectedPeripheral?.writeValue(data, for: speaker.characteristics[speaker.VOLUME_UUID]!, type: .withResponse)
+                    speaker.volumeDown()
                 }) {
                     Image(systemName: "arrow.down").bold()
                         .padding(.horizontal, 60)
