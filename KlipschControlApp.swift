@@ -26,8 +26,9 @@ class Speaker: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, Observa
     @Published var deviceReady = false
     @Published var powerOn = false
     @Published var volume = Data([0x01])
+    @Published var activeInput = Data([0x01])
     @Published var statusText = "Disconnected"
-
+    
     var UUIDS: [String] = []
     
     // Core Bluetooth properties
@@ -37,7 +38,7 @@ class Speaker: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, Observa
     
     var characteristics: [String: CBCharacteristic] = [:]
     var descriptors: [String: [CBDescriptor]] = [:]
-
+    
     override init() {
         super.init()
         UUIDS = [VOLUME_UUID, POWER_UUID, INPUT_UUID]
@@ -48,20 +49,20 @@ class Speaker: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, Observa
         self.statusText = "Looking for speaker"
         centralManager.scanForPeripherals(withServices: nil, options: nil)
     }
-
+    
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
-       switch central.state {
-       case .poweredOn:
-           bluetoothReady = true
-           self.statusText = "Bluetooth is ready"
-           centralManager.scanForPeripherals(withServices: nil, options: nil)
-       default:
-           deviceReady = false
-           powerOn = false
-           bluetoothReady = false
-           self.statusText = "Bluetooth not ready"
-           break
-       }
+        switch central.state {
+        case .poweredOn:
+            bluetoothReady = true
+            self.statusText = "Bluetooth is ready"
+            centralManager.scanForPeripherals(withServices: nil, options: nil)
+        default:
+            deviceReady = false
+            powerOn = false
+            bluetoothReady = false
+            self.statusText = "Bluetooth not ready"
+            break
+        }
     }
     
     // Restore the connection to the peripherals
@@ -74,10 +75,10 @@ class Speaker: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, Observa
                 }
             }
         } else {
-            self.statusText = "Bluetooth not ready"
+            self.statusText = "Bluetooth not ready for restore"
         }
     }
-
+    
     func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String : Any], rssi RSSI: NSNumber) {
         
         if peripheral.name == DEVICE_NAME {
@@ -129,6 +130,16 @@ class Speaker: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, Observa
                 if characteristic.uuid.uuidString == VOLUME_UUID {
                     peripheral.readValue(for: characteristic)
                 }
+                
+                // read the input value
+                if characteristic.uuid.uuidString == INPUT_UUID {
+                    peripheral.readValue(for: characteristic)
+                }
+                
+                // read the power value
+                if characteristic.uuid.uuidString == POWER_UUID {
+                    peripheral.readValue(for: characteristic)
+                }
             }
         })
     }
@@ -137,7 +148,7 @@ class Speaker: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, Observa
     func peripheral(_ peripheral: CBPeripheral, didDiscoverDescriptorsFor characteristic: CBCharacteristic, error: Error?) {
         if UUIDS.contains(characteristic.uuid.uuidString) {
             descriptors[characteristic.uuid.uuidString] = characteristic.descriptors
-            self.statusText = "Connected"
+            self.statusText = "" // We're good, no need for status text
             deviceReady = true
         }
     }
@@ -153,11 +164,16 @@ class Speaker: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, Observa
             self.statusText = "Error didUpdateValue \(e.localizedDescription)"
             return
         }
-
+        
         if characteristic.uuid.uuidString == VOLUME_UUID {
             guard let data = characteristic.value else { return }
             volume = data
             deviceReady = true
+        }
+        
+        if characteristic.uuid.uuidString == INPUT_UUID {
+            guard let data = characteristic.value else { return }
+            activeInput = data
         }
         
         if characteristic.uuid.uuidString == POWER_UUID {
@@ -167,7 +183,6 @@ class Speaker: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, Observa
             } else {
                 connectedPeripheral?.setNotifyValue(true, for: characteristic)
                 connectedPeripheral?.writeValue(Data([0x01]), for: characteristic, type: .withResponse)
-                powerOn = true
             }
         }
     }
@@ -190,32 +205,33 @@ class Speaker: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate, Observa
         }
     }
     
-    func forcePowerOn() {
-        self.connectedPeripheral?.setNotifyValue(true, for: self.characteristics[INPUT_UUID]!)
-        self.connectedPeripheral?.writeValue(Data([0x01]), for: self.characteristics[POWER_UUID]!, type: .withResponse)
-    }
-    
     func switchInput(data: Data) {
+        ensureOn()
         self.connectedPeripheral?.setNotifyValue(true, for: self.characteristics[INPUT_UUID]!)
-        self.connectedPeripheral?.writeValue(digital, for: self.characteristics[INPUT_UUID]!, type: .withResponse)
+        self.connectedPeripheral?.writeValue(data, for: self.characteristics[INPUT_UUID]!, type: .withResponse)
     }
     
     func volumeUp() {
         let integerValue = self.volume.withUnsafeBytes { $0.load(as: UInt8.self) }
-        let newValue = integerValue + 1
-        let data = Data([newValue])
-        
-        self.connectedPeripheral?.setNotifyValue(true, for: self.characteristics[VOLUME_UUID]!)
-        self.connectedPeripheral?.writeValue(data, for: self.characteristics[VOLUME_UUID]!, type: .withResponse)
+        volume(data: Data([integerValue + 1]))
     }
     
     func volumeDown() {
         let integerValue = self.volume.withUnsafeBytes { $0.load(as: UInt8.self) }
-        let newValue = integerValue - 1
-        let data = Data([newValue])
-        
+        volume(data: Data([integerValue - 1]))
+    }
+    
+    func volume(data: Data) {
+        ensureOn()
         self.connectedPeripheral?.setNotifyValue(true, for: self.characteristics[VOLUME_UUID]!)
         self.connectedPeripheral?.writeValue(data, for: self.characteristics[VOLUME_UUID]!, type: .withResponse)
+    }
+    
+    func ensureOn() {
+        if !powerOn {
+            self.connectedPeripheral?.setNotifyValue(true, for: self.characteristics[POWER_UUID]!)
+            self.connectedPeripheral?.writeValue(Data([0x01]), for: self.characteristics[POWER_UUID]!, type: .withResponse)
+        }
     }
 }
 
@@ -236,7 +252,6 @@ struct KlipschControlApp: App {
             if scenePhase == .background {
                 startBackgroundTask()
             }
-
         }
     }
     
@@ -255,7 +270,6 @@ struct KlipschControlApp: App {
             if UIApplication.shared.applicationState == .background {
                 speaker.disconnect()
             }
-            
             self.endBackgroundTask()
         }
     }
